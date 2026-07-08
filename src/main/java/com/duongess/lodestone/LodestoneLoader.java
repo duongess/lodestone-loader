@@ -2,19 +2,19 @@ package com.duongess.lodestone;
 
 import net.fabricmc.api.ModInitializer;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
-import net.minecraft.component.DataComponentTypes;
-import net.minecraft.component.type.LodestoneTrackerComponent;
-import net.minecraft.item.ItemStack;
-import net.minecraft.item.Items;
-import net.minecraft.registry.RegistryKey;
-import net.minecraft.registry.RegistryKeys;
+import net.minecraft.core.component.DataComponents;
+import net.minecraft.world.item.component.LodestoneTracker;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
+import net.minecraft.core.registries.Registries;
+import net.minecraft.resources.ResourceKey;
+import net.minecraft.resources.Identifier; //ResourceLocation
 import net.minecraft.server.MinecraftServer;
-import net.minecraft.server.network.ServerPlayerEntity;
-import net.minecraft.server.world.ServerWorld;
-import net.minecraft.util.Identifier;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.ChunkPos;
-import net.minecraft.world.World;
+import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.core.BlockPos;
+import net.minecraft.world.level.ChunkPos;
+import net.minecraft.world.level.Level;
 
 import java.util.HashSet;
 import java.util.Set;
@@ -33,24 +33,26 @@ public class LodestoneLoader implements ModInitializer {
                 tickCounter = 0;
                 Set<String> currentRequiredChunks = new HashSet<>();
 
-                for (ServerPlayerEntity player : server.getPlayerManager().getPlayerList()) {
-                    for (int i = 0; i < player.getInventory().size(); i++) {
-                        ItemStack stack = player.getInventory().getStack(i);
+                // Đổi thành ServerPlayer theo Mojang Mappings
+                for (ServerPlayer player : server.getPlayerCount() > 0 ? server.getPlayerList().getPlayers() : java.util.Collections.<ServerPlayer>emptyList()) {
+                    for (int i = 0; i < player.getInventory().getContainerSize(); i++) { // Đổi .size() thành .getContainerSize()
+                        ItemStack stack = player.getInventory().getItem(i); // Đổi .getStack() thành .getItem()
                         
-                        // Kiem tra dung chuan Data Component moi cua Mojang
-                        if (stack.isOf(Items.COMPASS) && stack.contains(DataComponentTypes.LODESTONE_TRACKER)) {
-                            LodestoneTrackerComponent tracker = stack.get(DataComponentTypes.LODESTONE_TRACKER);
+                        // Kiểm tra Component theo chuẩn Mojang 26.1 (.has() và lớp LodestoneTracker)
+                        if (stack.is(Items.COMPASS) && stack.has(DataComponents.LODESTONE_TRACKER)) {
+                            LodestoneTracker tracker = stack.get(DataComponents.LODESTONE_TRACKER);
                             
                             if (tracker != null && tracker.target().isPresent()) {
-                                LodestoneTrackerComponent.Target target = tracker.target().get();
-                                BlockPos lodestonePos = target.pos();
-                                String dimensionId = target.dimension().getValue().toString();
+                                var globalPos = tracker.target().get();
+                                BlockPos lodestonePos = globalPos.pos();
                                 
-                                ChunkPos centerChunk = new ChunkPos(lodestonePos);
+                                // Lấy chuỗi ID thế giới chuẩn qua .location()
+                                String dimensionId = globalPos.dimension().registryKey().toString();
+                                ChunkPos centerChunk = new ChunkPos(lodestonePos.getX() >> 4, lodestonePos.getZ() >> 4);
 
                                 for (int x = -1; x <= 1; x++) {
                                     for (int z = -1; z <= 1; z++) {
-                                        String chunkKey = dimensionId + "_" + (centerChunk.x + x) + "_" + (centerChunk.z + z);
+                                        String chunkKey = dimensionId + ":" + (centerChunk.getBlockX(i) + x) + ":" + (centerChunk.getBlockZ(i) + z);
                                         currentRequiredChunks.add(chunkKey);
                                     }
                                 }
@@ -59,12 +61,12 @@ public class LodestoneLoader implements ModInitializer {
                     }
                 }
 
+                // Đồng bộ chunk trạng thái
                 for (String chunkKey : activeLoadedChunks) {
                     if (!currentRequiredChunks.contains(chunkKey)) {
                         setChunkForceState(server, chunkKey, false);
                     }
                 }
-
                 for (String chunkKey : currentRequiredChunks) {
                     if (!activeLoadedChunks.contains(chunkKey)) {
                         setChunkForceState(server, chunkKey, true);
@@ -79,20 +81,22 @@ public class LodestoneLoader implements ModInitializer {
 
     private void setChunkForceState(MinecraftServer server, String chunkKey, boolean isForced) {
         try {
-            String[] parts = chunkKey.split("_");
-            if (parts.length != 3) return;
+            int lastColon = chunkKey.lastIndexOf(":");
+            int secondToLastColon = chunkKey.lastIndexOf(":", lastColon - 1);
+            
+            String dimId = chunkKey.substring(0, secondToLastColon);
+            int cX = Integer.parseInt(chunkKey.substring(secondToLastColon + 1, lastColon));
+            int cZ = Integer.parseInt(chunkKey.substring(lastColon + 1));
 
-            String dimensionId = parts[0] + ":" + parts[1]; // Noi thanh 'minecraft:overworld'
-            int chunkX = Integer.parseInt(parts[1]);
-            int chunkZ = Integer.parseInt(parts[2]);
-
-            // Truyen du lieu cho phien ban moi
-            RegistryKey<World> dimKey = RegistryKey.of(RegistryKeys.WORLD, Identifier.tryParse(parts[0]));
-            ServerWorld targetWorld = server.getWorld(dimKey);
+            // Đổi RegistryKey và parse ResourceLocation theo chuẩn mới
+            ResourceKey<Level> dimKey = ResourceKey.create(Registries.DIMENSION, Identifier.parse(dimId));
+            ServerLevel targetWorld = server.getLevel(dimKey);
 
             if (targetWorld != null) {
-                targetWorld.setChunkForced(chunkX, chunkZ, isForced);
+                targetWorld.setChunkForced(cX, cZ, isForced);
             }
-        } catch (Exception ignored) {}
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
     }
 }
