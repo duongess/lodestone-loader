@@ -7,13 +7,18 @@
   "authors": [
     "duongess"
   ],
-  "contact": {},
+  "contact": {
+		"sources": "https://github.com/duongess/lodestone-loader"
+	},
   "license": "CC0-1.0",
   "icon": "assets/lodestoneloader/icon.png",
   "environment": "*",
   "entrypoints": {
     "main": [
       "com.duongess.lodestone.LodestoneLoader"
+    ],
+    "client": [
+      "com.duongess.lodestone.LodestoneLoaderClient"
     ]
   },
   "depends": {
